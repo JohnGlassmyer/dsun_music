@@ -443,12 +443,15 @@ public class XmiTool {
 			Map<XmidiController, NavigableSet<Integer>> xmidiControllerLocations) {
 		Map<Integer, Integer> infiniteLoops = new HashMap<>();
 
-		NavigableSet<Integer> forLocations = xmidiControllerLocations.get(XmidiController.FOR);
+		NavigableSet<Integer> forLocations =
+				new TreeSet<Integer>(xmidiControllerLocations.get(XmidiController.FOR));
 		for (int nextLocation : xmidiControllerLocations.get(XmidiController.NEXT)) {
 			int matchingForLocation = forLocations.lower(nextLocation);
 			int loopLength = evntData[matchingForLocation + 2];
 			if (loopLength == 0 || loopLength == 127) {
 				infiniteLoops.put(matchingForLocation, nextLocation);
+			} else {
+				forLocations.remove(matchingForLocation);
 			}
 		}
 
