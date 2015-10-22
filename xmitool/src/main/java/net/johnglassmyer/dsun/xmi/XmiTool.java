@@ -14,10 +14,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package net.johnglassmyer.dsun_music.xmi;
+package net.johnglassmyer.dsun.xmi;
 
 import static java.nio.ByteOrder.BIG_ENDIAN;
-import static net.johnglassmyer.dsun_music.common.JoptSimpleUtil.ofOptionValueOrEmpty;
+import static net.johnglassmyer.dsun.common.JoptSimpleUtil.ofOptionValueOrEmpty;
 
 import java.io.IOException;
 import java.io.OutputStream;

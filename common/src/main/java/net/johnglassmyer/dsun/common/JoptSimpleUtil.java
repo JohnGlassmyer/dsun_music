@@ -14,7 +14,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package net.johnglassmyer.dsun_music.common;
+package net.johnglassmyer.dsun.common;
 
 import java.util.List;
 import java.util.Optional;

@@ -3,8 +3,8 @@
 >
 	<modelVersion>4.0.0</modelVersion>
 
-	<groupId>net.johnglassmyer.dsun_music</groupId>
-	<artifactId>dsun_music</artifactId>
+	<groupId>net.johnglassmyer.dsun</groupId>
+	<artifactId>dsun</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<packaging>pom</packaging>
 
@@ -22,7 +22,7 @@
 				<version>18.0</version>
 			</dependency>
 			<dependency>
-				<groupId>net.johnglassmyer.dsun_music</groupId>
+				<groupId>net.johnglassmyer.dsun</groupId>
 				<artifactId>common</artifactId>
 				<version>${project.version}</version>
 			</dependency>

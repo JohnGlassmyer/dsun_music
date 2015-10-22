@@ -4,8 +4,8 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<parent>
-		<groupId>net.johnglassmyer.dsun_music</groupId>
-		<artifactId>dsun_music</artifactId>
+		<groupId>net.johnglassmyer.dsun</groupId>
+		<artifactId>dsun</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
 

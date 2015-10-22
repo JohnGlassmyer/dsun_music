@@ -15,10 +15,10 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package net.johnglassmyer.dsun_music.gff;
+package net.johnglassmyer.dsun.gff;
 
 import static com.google.common.base.Preconditions.checkArgument;
-import static net.johnglassmyer.dsun_music.common.JoptSimpleUtil.ofOptionValueOrEmpty;
+import static net.johnglassmyer.dsun.common.JoptSimpleUtil.ofOptionValueOrEmpty;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -43,7 +43,7 @@ import java.util.TreeMap;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
-import net.johnglassmyer.dsun_music.gff.GffTool.GffiTable.TableType;
+import net.johnglassmyer.dsun.gff.GffTool.GffiTable.TableType;
 
 public class GffTool {
 	static class ChunkLocation {

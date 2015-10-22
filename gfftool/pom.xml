@@ -4,8 +4,8 @@
 	<modelVersion>4.0.0</modelVersion>
 
 	<parent>
-		<groupId>net.johnglassmyer.dsun_music</groupId>
-		<artifactId>dsun_music</artifactId>
+		<groupId>net.johnglassmyer.dsun</groupId>
+		<artifactId>dsun</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
 
@@ -17,7 +17,7 @@
 			<artifactId>guava</artifactId>
 		</dependency>
 		<dependency>
-			<groupId>net.johnglassmyer.dsun_music</groupId>
+			<groupId>net.johnglassmyer.dsun</groupId>
 			<artifactId>common</artifactId>
 		</dependency>
 		<dependency>
@@ -37,7 +37,7 @@
 						<configuration>
 							<archive>
 								<manifest>
-									<mainClass>net.johnglassmyer.dsun_music.gff.GffTool</mainClass>
+									<mainClass>net.johnglassmyer.dsun.gff.GffTool</mainClass>
 								</manifest>
 							</archive>
 							<finalName>gfftool</finalName>
