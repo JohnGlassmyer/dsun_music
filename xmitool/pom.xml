@@ -9,7 +9,7 @@
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
 
-	<artifactId>m_xmitool</artifactId>
+	<artifactId>xmitool</artifactId>
 
 	<dependencies>
 		<dependency>
