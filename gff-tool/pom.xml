@@ -9,7 +9,7 @@
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
 
-	<artifactId>gfftool</artifactId>
+	<artifactId>gff-tool</artifactId>
 
 	<dependencies>
 		<dependency>
@@ -37,10 +37,10 @@
 						<configuration>
 							<archive>
 								<manifest>
-									<mainClass>net.johnglassmyer.dsun.gff.GffTool</mainClass>
+									<mainClass>net.johnglassmyer.dsun.gff_tool.GffTool</mainClass>
 								</manifest>
 							</archive>
-							<finalName>gfftool</finalName>
+							<finalName>gff-tool</finalName>
 						</configuration>
 					</execution>
 				</executions>

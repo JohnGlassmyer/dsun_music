@@ -15,7 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package net.johnglassmyer.dsun.gff;
+package net.johnglassmyer.dsun.gff_tool;
 
 import static net.johnglassmyer.dsun.common.JoptSimpleUtil.ofOptionValueOrEmpty;
 

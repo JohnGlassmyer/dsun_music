@@ -9,7 +9,7 @@
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
 
-	<artifactId>xmitool</artifactId>
+	<artifactId>xmi-tool</artifactId>
 
 	<dependencies>
 		<dependency>
@@ -33,10 +33,10 @@
 						<configuration>
 							<archive>
 								<manifest>
-									<mainClass>net.johnglassmyer.dsun.xmi.XmiTool</mainClass>
+									<mainClass>net.johnglassmyer.dsun.xmi_tool.XmiTool</mainClass>
 								</manifest>
 							</archive>
-							<finalName>xmitool</finalName>
+							<finalName>xmi-tool</finalName>
 						</configuration>
 					</execution>
 				</executions>

@@ -10,10 +10,10 @@
 
 	<modules>
 		<module>common</module>
-		<module>gfftool</module>
+		<module>gff-tool</module>
 		<module>image-tool</module>
 		<module>region-tool</module>
-		<module>xmitool</module>
+		<module>xmi-tool</module>
 	</modules>
 
 	<dependencyManagement>
