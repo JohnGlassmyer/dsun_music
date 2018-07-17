@@ -17,15 +17,11 @@
  */
 package net.johnglassmyer.dsun.gff_tool;
 
-import static net.johnglassmyer.dsun.common.JoptSimpleUtil.ofOptionValueOrEmpty;
-
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -34,43 +30,103 @@ import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
 
+import joptsimple.OptionException;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
+import joptsimple.util.PathConverter;
+import joptsimple.util.PathProperties;
 import net.johnglassmyer.dsun.common.gff.GffFile;
 import net.johnglassmyer.dsun.common.gff.GffiTable;
+import net.johnglassmyer.dsun.common.options.OptionsProcessor;
+import net.johnglassmyer.dsun.common.options.OptionsWithHelp;
 
 public class GffTool {
-	static class Options {
-		final boolean helpRequested;
+	private static abstract class Options implements OptionsWithHelp {
+		static class Processor extends OptionsProcessor<Options> {
+			@Override
+			public Options parseArgs(String[] args) throws OptionException {
+				OptionParser parser = new OptionParser();
+				parser.posixlyCorrect(true);
+
+				OptionSpec<Void> help = parser.accepts("help").forHelp();
+				OptionSpec<Path> gff = parser.accepts("gff")
+						.withRequiredArg().withValuesConvertedBy(
+								new PathConverter(PathProperties.FILE_EXISTING));
+				OptionSpec<Void> listContents = parser.accepts("list-contents");
+				OptionSpec<Path> extractToDir = parser.accepts("extract-to-dir")
+						.withRequiredArg().withValuesConvertedBy(new PathConverter());
+				OptionSpec<Path> replaceWith = parser.accepts("replace-with")
+						.withRequiredArg().withValuesConvertedBy(
+								new PathConverter(PathProperties.FILE_EXISTING));
+				OptionSpec<String> tag = parser.accepts("tag")
+						.withRequiredArg().ofType(String.class);
+				OptionSpec<Integer> index = parser.accepts("index")
+						.withRequiredArg().ofType(Integer.class);
+
+				OptionSet optionSet = parser.parse(args);
+
+				return new Options(
+						optionSet.valueOfOptional(gff),
+						optionSet.has(listContents),
+						optionSet.valueOfOptional(extractToDir),
+						optionSet.valueOfOptional(replaceWith),
+						optionSet.valueOfOptional(tag),
+						optionSet.valueOfOptional(index)) {
+					@Override
+					public boolean isHelpRequested() {
+						return optionSet.has(help);
+					}
+				};
+			}
+
+			@Override
+			public boolean isUsageValid(Options options) {
+				int commandCount = (options.listContents ? 1 : 0)
+						+ (options.extractToDir.isPresent() ? 1 : 0)
+						+ (options.replaceWith.isPresent() ? 1 : 0);
+
+				// tag and/or index only with replace-with
+				boolean areReplaceWithOptionsCorrect = !(options.replaceWith.isPresent()
+						^ (options.tag.isPresent() || options.index.isPresent()));
+
+				return options.gff.isPresent() && commandCount == 1 && areReplaceWithOptionsCorrect;
+			}
+
+			@Override
+			public void printUsage() {
+				System.out.println("To list resources in a GFF:");
+				System.out.println("  java -jar gff-tool.jar --gff=<gffFile> --list-contents");
+				System.out.println("");
+				System.out.println("To extract all resources in a GFF into a directory:");
+				System.out.println("  java -jar gff-tool.jar --gff=<gffFile> "
+						+ "--extract-to-dir=<dir>");
+				System.out.println("");
+				System.out.println("To replace a resource in a GFF:");
+				System.out.println("  java -jar gff-tool.jar --gff=<gffFile> "
+						+ "--replace-with=<file> --tag=TAG --index=n");
+			}
+		}
+
+		final Optional<Path> gff;
 		final boolean listContents;
-		final Optional<String> extractToDir;
-		final Optional<String> replaceWith;
+		final Optional<Path> extractToDir;
+		final Optional<Path> replaceWith;
 		final Optional<String> tag;
 		final Optional<Integer> index;
-		final List<String> filenames;
-		private final OptionParser parser;
 
-		Options(boolean help,
+		Options(Optional<Path> gff,
 				boolean listContents,
-				Optional<String> extractToDir,
-				Optional<String> replaceWith,
+				Optional<Path> extractToDir,
+				Optional<Path> replaceWith,
 				Optional<String> tag,
-				Optional<Integer> index,
-				List<String> filenames,
-				OptionParser parser) {
-			this.helpRequested = help;
+				Optional<Integer> index) {
+			this.gff = gff;
 			this.listContents = listContents;
 			this.extractToDir = extractToDir;
 			this.replaceWith = replaceWith;
 			this.tag = tag;
 			this.index = index;
-			this.filenames = Collections.unmodifiableList(filenames);
-			this.parser = parser;
-		}
-
-		void printHelpOn(OutputStream sink) throws IOException {
-			parser.printHelpOn(sink);
 		}
 	}
 
@@ -91,84 +147,29 @@ public class GffTool {
 	private static final PrintStream OUT = System.out;
 
 	public static void main(String[] args) throws IOException, URISyntaxException {
-		Options options = parseOptions(args);
+		Options options = new Options.Processor().process(args);
 
-		// TODO: Instead, require replaceWith with (tag OR index)
-		//       once jopt-simple supports mutually dependent options
-		boolean tagOrIndexWithoutReplaceWith = options.replaceWith.isPresent()
-				^ (options.tag.isPresent() || options.index.isPresent());
+		Path gffPath = options.gff.get();
 
-		if (options.helpRequested
-				|| options.filenames.isEmpty()
-				|| (options.extractToDir.isPresent() || options.replaceWith.isPresent())
-						&& options.filenames.size() > 1
-				|| tagOrIndexWithoutReplaceWith) {
-			options.printHelpOn(OUT);
-		} else {
-			for (String filename : options.filenames) {
-				OUT.println(filename);
+		byte[] bytes = Files.readAllBytes(gffPath);
+		GffFile gffFile = GffFile.create(bytes);
 
-				Path path = Paths.get(filename);
-				byte[] bytes = Files.readAllBytes(path);
-				GffFile gffFile = GffFile.create(bytes);
-
-				if (options.listContents) {
-					listContents(gffFile, bytes.length);
-				}
-
-				if (options.extractToDir.isPresent()) {
-					extractAllChunks(gffFile, options.extractToDir.get());
-				}
-
-				if (options.replaceWith.isPresent()) {
-					byte[] replacement = Files.readAllBytes(Paths.get(options.replaceWith.get()));
-
-					byte[] bytesWithReplacement = gffFile.replaceChunk(
-							options.tag.get(), options.index.get(), replacement);
-
-					Files.write(path, bytesWithReplacement);
-				}
-			}
+		if (options.listContents) {
+			listContents(gffFile, bytes.length);
 		}
-	}
 
-	private static Options parseOptions(String[] args) {
-		OptionParser parser = new OptionParser();
+		if (options.extractToDir.isPresent()) {
+			extractAllChunks(gffFile, options.extractToDir.get());
+		}
 
-		OptionSpec<Void> helpOption = parser.accepts("help").forHelp();
-		OptionSpec<Void> listContentsOption = parser.accepts("list-contents",
-				"list the contents of the GFF file(s)");
-		OptionSpec<String> extractToDirOption = parser.accepts("extract-to-dir",
-				"extract contents of the GFF file to this directory")
-				.withRequiredArg().ofType(String.class).describedAs("directory");
-		OptionSpec<String> replaceWithOption = parser.accepts("replace-with",
-				"replace a chunk in the GFF file (specified by tag and index) with this file")
-				.withRequiredArg().ofType(String.class).describedAs("file");
-		OptionSpec<String> tagBuilder = parser.accepts("tag",
-				"4-character tag of chunk to replace (with --replace-with)")
-				.requiredIf(replaceWithOption)
-				.withRequiredArg().ofType(String.class).describedAs("xxxx");
-		OptionSpec<Integer> indexBuilder = parser.accepts("index",
-				"numeric index of chunk to replace (with --replace-with)")
-				.requiredIf(replaceWithOption)
-				.withRequiredArg().ofType(Integer.class);
+		if (options.replaceWith.isPresent()) {
+			byte[] replacement = Files.readAllBytes(options.replaceWith.get());
 
-		OptionSpec<String> filenamesOption = parser.nonOptions()
-				.ofType(String.class).describedAs("GFF file(s)");
+			byte[] bytesWithReplacement = gffFile.replaceChunk(
+					options.tag.get(), options.index.get(), replacement);
 
-		parser.posixlyCorrect(true);
-
-		OptionSet optionSet = parser.parse(args);
-
-		return new Options(
-				optionSet.has(helpOption),
-				optionSet.has(listContentsOption),
-				ofOptionValueOrEmpty(optionSet, extractToDirOption),
-				ofOptionValueOrEmpty(optionSet, replaceWithOption),
-				ofOptionValueOrEmpty(optionSet, tagBuilder),
-				ofOptionValueOrEmpty(optionSet, indexBuilder),
-				optionSet.valuesOf(filenamesOption),
-				parser);
+			Files.write(gffPath, bytesWithReplacement);
+		}
 	}
 
 	private static void listContents(GffFile gffFile, int length) {
@@ -224,16 +225,14 @@ public class GffTool {
 		return String.format(indexTemplate, index);
 	}
 
-	private static void extractAllChunks(GffFile gffFile, String extractToDir) throws IOException {
-		Path dirPath = Paths.get(extractToDir);
-
+	private static void extractAllChunks(GffFile gffFile, Path dirPath) throws IOException {
 		OUT.format("  Extracting all chunks to directory %s.\n", dirPath);
 
 		Files.createDirectories(dirPath);
 
 		Map<String, GffiTable> tablesByTag = gffFile.getTablesByTag();
 
-		List<String> sortedTags = new ArrayList<String>(tablesByTag.keySet());
+		List<String> sortedTags = new ArrayList<>(tablesByTag.keySet());
 		Collections.sort(sortedTags);
 
 		for (String tag : sortedTags) {

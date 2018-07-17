@@ -17,10 +17,7 @@
 package net.johnglassmyer.dsun.xmi_tool;
 
 import static java.nio.ByteOrder.BIG_ENDIAN;
-import static net.johnglassmyer.dsun.common.JoptSimpleUtil.ofOptionValueOrEmpty;
-
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
 import java.net.URISyntaxException;
@@ -41,39 +38,84 @@ import java.util.NavigableSet;
 import java.util.Optional;
 import java.util.TreeSet;
 
+import joptsimple.OptionException;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
+import net.johnglassmyer.dsun.common.options.OptionsProcessor;
+import net.johnglassmyer.dsun.common.options.OptionsWithHelp;
 
 public class XmiTool {
-	static class Options {
-		final boolean helpRequested;
+	private static abstract class Options implements OptionsWithHelp {
+		static class Processor extends OptionsProcessor<Options> {
+			@Override
+			public Options parseArgs(String[] args) throws OptionException {
+				OptionParser parser = new OptionParser();
+				parser.posixlyCorrect(true);
+
+				OptionSpec<Void> help = parser.accepts("help");
+				OptionSpec<Void> zeroRbrnCountOption = parser.accepts("zero-rbrn-count");
+				OptionSpec<Void> removeApiControlOption = parser.accepts("remove-api-control");
+				OptionSpec<Void> unifyLoopsOption = parser.accepts("unify-loops");
+				OptionSpec<Integer> setLoopIterationsOption = parser.accepts("set-loop-iterations")
+						.withRequiredArg().ofType(Integer.class);
+				OptionSpec<String> filenamesOption = parser.nonOptions().ofType(String.class);
+
+				OptionSet optionSet = parser.parse(args);
+
+				return new Options(
+						optionSet.has(zeroRbrnCountOption),
+						optionSet.has(removeApiControlOption),
+						optionSet.valueOfOptional(setLoopIterationsOption),
+						optionSet.has(unifyLoopsOption),
+						optionSet.valuesOf(filenamesOption)) {
+					@Override
+					public boolean isHelpRequested() {
+						return optionSet.has(help);
+					}
+				};
+			}
+
+			@Override
+			public boolean isUsageValid(Options options) {
+				return !options.filenames.isEmpty();
+			}
+
+			@Override
+			public void printUsage() {
+				System.out.println("Usage:");
+				System.out.println("  java -jar xmi-tool.jar [options] xmiFile...");
+				System.out.println("");
+				System.out.println("Options:");
+				System.out.println("  --zero-rbrn-count        "
+						+ "set the sequence branch index count in the RBRN chunk to 0");
+				System.out.println("  --remove-api-control     "
+						+ "obliterate occurrences of XMIDI controllers 0x73 (Indirect Controller) "
+						+ "and 0x77 (Callback)");
+				System.out.println("  --unify-loops            "
+						+ "replace multiple infinite loops with one loop");
+				System.out.println("  --set-loop-iterations=n  "
+						+ "set the number of iterations of all infinite loops");
+			}
+		}
+
 		final boolean zeroRbrnCount;
 		final boolean removeApiControl;
 		final Optional<Integer> newLoopIterations;
 		final boolean unifyLoops;
 		final List<String> filenames;
-		private final OptionParser parser;
 
 		Options(
-				boolean helpRequested,
 				boolean zeroRbrnCount,
 				boolean removeApiControl,
 				Optional<Integer> newLoopIterations,
 				boolean unifyLoops,
-				List<String> filenames,
-				OptionParser parser) {
-			this.helpRequested = helpRequested;
+				List<String> filenames) {
 			this.zeroRbrnCount = zeroRbrnCount;
 			this.removeApiControl = removeApiControl;
 			this.newLoopIterations = newLoopIterations;
 			this.unifyLoops = unifyLoops;
 			this.filenames = Collections.unmodifiableList(filenames);
-			this.parser = parser;
-		}
-
-		void printHelpOn(OutputStream sink) throws IOException {
-			parser.printHelpOn(sink);
 		}
 	}
 
@@ -153,6 +195,7 @@ public class XmiTool {
 	static final PrintStream OUT;
 	static {
 		try {
+			// UTF-8 encoding for musical-note characters
 			OUT = new PrintStream(System.out, true, "UTF-8");
 		} catch (UnsupportedEncodingException e) {
 			throw new RuntimeException(e);
@@ -160,48 +203,14 @@ public class XmiTool {
 	}
 
 	public static void main(String[] args) throws IOException, URISyntaxException {
-		Options options = parseOptions(args);
+		Options options = new Options.Processor().process(args);
 
-		if (options.helpRequested || options.filenames.isEmpty()) {
-			options.printHelpOn(OUT);
-		} else {
-			for (String filename : options.filenames) {
-				Path path = Paths.get(filename);
-				OUT.println(path);
-				processXmi(path, options);
-				OUT.println();
-			}
+		for (String filename : options.filenames) {
+			Path path = Paths.get(filename);
+			OUT.println(path);
+			processXmi(path, options);
+			OUT.println();
 		}
-	}
-
-	private static Options parseOptions(String[] args) {
-		OptionParser parser = new OptionParser();
-		OptionSpec<Void> helpOption = parser.accepts("help").forHelp();
-		OptionSpec<Void> zeroRbrnCountOption = parser.accepts("zero-rbrn-count",
-				"set the sequence branch index count in the RBRN chunk to 0");
-		OptionSpec<Void> removeApiControlOption = parser.accepts("remove-api-control",
-				"obliterate occurrences of XMIDI controllers 0x73 "
-				+ "(Indirect Controller) and 0x77 (Callback)");
-		OptionSpec<Void> unifyLoopsOption = parser.accepts("unify-loops",
-				"replace multiple infinite loops with one loop");
-		OptionSpec<Integer> setLoopIterationsOption = parser.accepts("set-loop-iterations",
-				"set the number of iterations of all infinite loops")
-				.withRequiredArg().ofType(Integer.class);
-		OptionSpec<String> filenamesOption =
-				parser.nonOptions().describedAs("XMI file(s)").ofType(String.class);
-
-		parser.posixlyCorrect(true);
-
-		OptionSet optionSet = parser.parse(args);
-
-		return new Options(
-				optionSet.has(helpOption),
-				optionSet.has(zeroRbrnCountOption),
-				optionSet.has(removeApiControlOption),
-				ofOptionValueOrEmpty(optionSet, setLoopIterationsOption),
-				optionSet.has(unifyLoopsOption),
-				optionSet.valuesOf(filenamesOption),
-				parser);
 	}
 
 	private static void processXmi(Path path, Options options) throws IOException {
@@ -444,7 +453,7 @@ public class XmiTool {
 		Map<Integer, Integer> infiniteLoops = new HashMap<>();
 
 		NavigableSet<Integer> forLocations =
-				new TreeSet<Integer>(xmidiControllerLocations.get(XmidiController.FOR));
+				new TreeSet<>(xmidiControllerLocations.get(XmidiController.FOR));
 		for (int nextLocation : xmidiControllerLocations.get(XmidiController.NEXT)) {
 			int matchingForLocation = forLocations.lower(nextLocation);
 			int loopLength = evntData[matchingForLocation + 2];
