@@ -17,23 +17,17 @@
  */
 package net.johnglassmyer.dsun.gff;
 
-import static com.google.common.base.Preconditions.checkArgument;
 import static net.johnglassmyer.dsun.common.JoptSimpleUtil.ofOptionValueOrEmpty;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -43,131 +37,10 @@ import java.util.TreeMap;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
-import net.johnglassmyer.dsun.gff.GffTool.GffiTable.TableType;
+import net.johnglassmyer.dsun.common.gff.GffFile;
+import net.johnglassmyer.dsun.common.gff.GffiTable;
 
 public class GffTool {
-	static class ChunkLocation {
-		final int start;
-		final int length;
-
-		ChunkLocation(int start, int length) {
-			this.start = start;
-			this.length = length;
-		}
-
-		@Override
-		public String toString() {
-			return String.format("(%x, %x)", start, length);
-		}
-	}
-
-	static class Chunk {
-		final ChunkLocation location;
-		final byte[] data;
-
-		Chunk(ChunkLocation location, byte[] data) {
-			this.location = location;
-			this.data = data;
-		}
-	}
-
-	static class GffiTable {
-		enum TableType {
-			PRIMARY {
-				@Override
-				int entrySize() {
-					return 12;
-				}
-
-				@Override
-				int offsetOffset() {
-					return 4;
-				}
-
-				@Override
-				int sizeOffset() {
-					return 8;
-				}
-			},
-
-			SECONDARY {
-				@Override
-				int entrySize() {
-					return 8;
-				}
-
-				@Override
-				int offsetOffset() {
-					return 0;
-				}
-
-				@Override
-				int sizeOffset() {
-					return 4;
-				}
-			},
-
-			;
-
-			abstract int entrySize();
-
-			abstract int offsetOffset();
-
-			abstract int sizeOffset();
-		}
-
-		private final ByteBuffer buffer;
-		private final int startPosition;
-		private final int numberOfEntries;
-		private final TableType tableType;
-
-		static GffiTable create(byte[] bytes, int startPosition, TableType type) {
-			ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
-			buffer.position(startPosition);
-			int numberOfEntries = buffer.getInt();
-			return new GffiTable(buffer, startPosition, numberOfEntries, type);
-		}
-
-		private GffiTable(ByteBuffer buffer, int startPosition, int numberOfEntries, TableType type) {
-			this.buffer = buffer;
-			this.startPosition = startPosition;
-			this.numberOfEntries = numberOfEntries;
-			this.tableType = type;
-		}
-
-		int getTotalSize() {
-			return 4 + numberOfEntries * tableType.entrySize();
-		}
-
-		int getNumberOfEntries() {
-			return numberOfEntries;
-		}
-
-		int getOffset(int index) {
-			checkArgument(index < numberOfEntries);
-			return buffer.getInt(entryPosition(index) + tableType.offsetOffset());
-		}
-
-		void setOffset(int index, int offset) {
-			checkArgument(index < numberOfEntries);
-			buffer.putInt(entryPosition(index) + tableType.offsetOffset(), offset);
-		}
-
-		int getSize(int index) {
-			checkArgument(index < numberOfEntries);
-			return buffer.getInt(entryPosition(index) + tableType.sizeOffset());
-		}
-
-		void setSize(int index, int size) {
-			checkArgument(index < numberOfEntries);
-			buffer.putInt(entryPosition(index) + tableType.sizeOffset(), size);
-		}
-
-		private int entryPosition(int index) {
-			return startPosition + 4 + index * tableType.entrySize();
-		}
-	}
-
 	static class Options {
 		final boolean helpRequested;
 		final boolean listContents;
@@ -236,23 +109,22 @@ public class GffTool {
 				OUT.println(filename);
 
 				Path path = Paths.get(filename);
-
 				byte[] bytes = Files.readAllBytes(path);
-
-				Map<String, GffiTable> tablesByTag = createTables(bytes);
+				GffFile gffFile = GffFile.create(bytes);
 
 				if (options.listContents) {
-					listContents(tablesByTag, bytes.length);
+					listContents(gffFile, bytes.length);
 				}
 
 				if (options.extractToDir.isPresent()) {
-					extractAllChunks(bytes, tablesByTag, options.extractToDir.get());
-				} else if (options.replaceWith.isPresent()) {
-					String tag = options.tag.get();
-					int index = options.index.get();
-					String replacementFilename = options.replaceWith.get();
-					byte[] bytesWithReplacement =
-							replaceChunk(bytes, tablesByTag, tag, index, replacementFilename);
+					extractAllChunks(gffFile, options.extractToDir.get());
+				}
+
+				if (options.replaceWith.isPresent()) {
+					byte[] replacement = Files.readAllBytes(Paths.get(options.replaceWith.get()));
+
+					byte[] bytesWithReplacement = gffFile.replaceChunk(
+							options.tag.get(), options.index.get(), replacement);
 
 					Files.write(path, bytesWithReplacement);
 				}
@@ -299,72 +171,15 @@ public class GffTool {
 				parser);
 	}
 
-	private static Map<String, GffiTable> createTables(byte[] bytes) {
-		ByteBuffer buffer = ByteBuffer.wrap(bytes);
-		buffer.order(ByteOrder.LITTLE_ENDIAN);
-
-		int indexStart = buffer.getInt(12);
-		buffer.position(indexStart);
-
-		buffer.getInt();
-		buffer.getInt();
-
-		Map<String, GffiTable> tablesByTag = new HashMap<>();
-
-		Map<String, Integer> secondaryTableIndexForTag = new HashMap<String, Integer>();
-		int numberOfTags = buffer.getShort();
-		for (int iTag = 0; iTag < numberOfTags; iTag++) {
-			String tag = readTag(buffer);
-
-			if (tablesByTag.containsKey(tag)) {
-				throw new IllegalStateException("Encountered a second table for tag " + tag);
-			}
-
-			int numberOfChunksIfPrimary = buffer.getInt();
-			if (numberOfChunksIfPrimary > 0) {
-				int tableStartPosition = buffer.position() - 4;
-				GffiTable table = GffiTable.create(bytes, tableStartPosition, TableType.PRIMARY);
-				tablesByTag.put(tag, table);
-				buffer.position(tableStartPosition + table.getTotalSize());
-			} else {
-				buffer.getInt();
-
-				int secondaryTableIndex = buffer.getInt();
-				secondaryTableIndexForTag.put(tag, secondaryTableIndex);
-
-				int numberOfUnknowns = buffer.getInt();
-				for (int iUnknown = 0; iUnknown < numberOfUnknowns; iUnknown++) {
-					buffer.getInt();
-					buffer.getInt();
-				}
-			}
-		}
-
-		GffiTable gffiTable = tablesByTag.get("GFFI");
-		for (Map.Entry<String, Integer> tagAndIndex : secondaryTableIndexForTag.entrySet()) {
-			String tag = tagAndIndex.getKey();
-			int secondaryTableIndex = tagAndIndex.getValue();
-			int secondaryTablePosition = gffiTable.getOffset(secondaryTableIndex);
-			tablesByTag.put(tag,
-					GffiTable.create(bytes, secondaryTablePosition, TableType.SECONDARY));
-		}
-
-		return tablesByTag;
-	}
-
-	private static String readTag(ByteBuffer buffer) {
-		byte[] tagBytes = new byte[4];
-		buffer.get(tagBytes);
-		return new String(tagBytes, StandardCharsets.US_ASCII);
-	}
-
-	private static void listContents(Map<String, GffiTable> tablesByTag, int length) {
+	private static void listContents(GffFile gffFile, int length) {
 		NavigableMap<Integer, ChunkDescriptor> descriptorsByOffset = new TreeMap<>();
+
+		Map<String, GffiTable> tablesByTag = gffFile.getTablesByTag();
 
 		for (Map.Entry<String, GffiTable> tagAndTable : tablesByTag.entrySet()) {
 			String tag = tagAndTable.getKey();
 			GffiTable table = tagAndTable.getValue();
-			for (int i = 0; i < table.getNumberOfEntries(); i++) {
+			for (int i = 0; i < table.getNumberOfChunks(); i++) {
 				int offset = table.getOffset(i);
 				int size = table.getSize(i);
 				descriptorsByOffset.put(offset, new ChunkDescriptor(tag, i, offset, size));
@@ -387,7 +202,7 @@ public class GffTool {
 
 			ChunkDescriptor descriptor = offsetAndDescriptor.getValue();
 
-			int numberOfEntries = tablesByTag.get(descriptor.tag).getNumberOfEntries();
+			int numberOfEntries = tablesByTag.get(descriptor.tag).getNumberOfChunks();
 			String chunkName = formatChunkName(descriptor.tag, descriptor.index, numberOfEntries);
 
 			OUT.format(template, offset, chunkName, descriptor.size);
@@ -409,14 +224,14 @@ public class GffTool {
 		return String.format(indexTemplate, index);
 	}
 
-	private static void extractAllChunks(
-			byte[] bytes, Map<String, GffiTable> tablesByTag, String extractToDir)
-			throws IOException {
+	private static void extractAllChunks(GffFile gffFile, String extractToDir) throws IOException {
 		Path dirPath = Paths.get(extractToDir);
 
 		OUT.format("  Extracting all chunks to directory %s.\n", dirPath);
 
 		Files.createDirectories(dirPath);
+
+		Map<String, GffiTable> tablesByTag = gffFile.getTablesByTag();
 
 		List<String> sortedTags = new ArrayList<String>(tablesByTag.keySet());
 		Collections.sort(sortedTags);
@@ -424,47 +239,14 @@ public class GffTool {
 		for (String tag : sortedTags) {
 			GffiTable table = tablesByTag.get(tag);
 
-			int numberOfEntries = table.getNumberOfEntries();
-			for (int i = 0; i < numberOfEntries; i++) {
-				String chunkName = formatChunkName(tag, i, numberOfEntries);
-				int offset = table.getOffset(i);
-				byte[] chunkData = Arrays.copyOfRange(bytes, offset, offset + table.getSize(i));
+			int numberOfChunks = table.getNumberOfChunks();
+			for (int i = 0; i < numberOfChunks; i++) {
+				String chunkName = formatChunkName(tag, i, numberOfChunks);
+				byte[] chunkData = gffFile.getChunkData(tag, i);
 				Files.write(dirPath.resolve(chunkName), chunkData);
 			}
 
-			OUT.format("    %s: %d chunks\n", tag, numberOfEntries);
-		}
-	}
-
-	/**
-	 * Returns either the original bytes, or a larger copy, with the replacement chunk copied in.
-	 */
-	private static byte[] replaceChunk(
-			byte[] bytes,
-			Map<String, GffiTable> tablesByTag,
-			String tag,
-			int index,
-			String replacementFilename) throws IOException {
-		byte[] replacement = Files.readAllBytes(Paths.get(replacementFilename));
-		int newSize = replacement.length;
-
-		GffiTable table = tablesByTag.get(tag);
-
-		int oldSize = table.getSize(index);
-		table.setSize(index, newSize);
-
-		if (newSize <= oldSize) {
-			// The replacement fits in the old space.
-			int offset = table.getOffset(index);
-			System.arraycopy(replacement, 0, bytes, offset, newSize);
-			return bytes;
-		} else {
-			// Append the (larger) replacement to the end of the file.
-			table.setOffset(index, bytes.length);
-			byte[] enlargedBytes = new byte[bytes.length + newSize];
-			System.arraycopy(bytes, 0, enlargedBytes, 0, bytes.length);
-			System.arraycopy(replacement, 0, enlargedBytes, bytes.length, newSize);
-			return enlargedBytes;
+			OUT.format("    %s: %d chunks\n", tag, numberOfChunks);
 		}
 	}
 }

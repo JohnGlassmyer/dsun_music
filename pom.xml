@@ -11,6 +11,8 @@
 	<modules>
 		<module>common</module>
 		<module>gfftool</module>
+		<module>image-tool</module>
+		<module>region-tool</module>
 		<module>xmitool</module>
 	</modules>
 
@@ -19,7 +21,12 @@
 			<dependency>
 				<groupId>com.google.guava</groupId>
 				<artifactId>guava</artifactId>
-				<version>18.0</version>
+				<version>23.0</version>
+			</dependency>
+			<dependency>
+				<groupId>mil.nga</groupId>
+				<artifactId>tiff</artifactId>
+				<version>2.0.0</version>
 			</dependency>
 			<dependency>
 				<groupId>net.johnglassmyer.dsun</groupId>
@@ -29,7 +36,7 @@
 			<dependency>
 				<groupId>net.sf.jopt-simple</groupId>
 				<artifactId>jopt-simple</artifactId>
-				<version>4.9</version>
+				<version>6.0-alpha-2</version>
 			</dependency>
 		</dependencies>
 	</dependencyManagement>
