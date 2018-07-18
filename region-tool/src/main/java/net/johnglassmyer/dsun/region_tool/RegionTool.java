@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Arrays;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import joptsimple.OptionException;
@@ -16,6 +18,7 @@ import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
 import joptsimple.util.PathConverter;
 import joptsimple.util.PathProperties;
+import mil.nga.tiff.FieldTagType;
 import mil.nga.tiff.FileDirectory;
 import mil.nga.tiff.TIFFImage;
 import mil.nga.tiff.TiffWriter;
@@ -123,20 +126,38 @@ public class RegionTool {
 
 		Palette palette = Palette.fromPalData(Files.readAllBytes(options.pal.get()));
 
-		FileDirectory tiffDirectory = createTiffDirectory(rmap, tileFramesByNumber, palette);
-		TiffWriter.writeTiff(options.outputTiff.get().toFile(), new TIFFImage(tiffDirectory));
+		FileDirectory rmapTiffDirectory = exportMapToTiffDirectory((tileX, tileY) -> {
+			int rmapByte = Byte.toUnsignedInt(rmap[tileY * MAP_WIDTH + tileX]);
+			byte[] tilePixels = tileFramesByNumber.get(rmapByte).getPixels();
+			Color[] tileColors = new Color[tilePixels.length];
+			for (int i = 0; i < tileColors.length; i++) {
+				tileColors[i] = palette.getColor(Byte.toUnsignedInt(tilePixels[i]));
+			}
+			return tileColors;
+		});
+		rmapTiffDirectory.setStringEntryValue(FieldTagType.PageName, "RMAP");
+
+		FileDirectory gmapTiffDirectory = exportMapToTiffDirectory((tileX, tileY) -> {
+			int gmapByte = Byte.toUnsignedInt(gmap[tileY * MAP_WIDTH + tileX]);
+			Color[] tileColors = new Color[TILE_DIMENSION * TILE_DIMENSION];
+			Arrays.fill(tileColors, new Color(gmapByte, gmapByte, gmapByte));
+			return tileColors;
+		});
+		gmapTiffDirectory.setStringEntryValue(FieldTagType.PageName, "GMAP");
+
+		TiffWriter.writeTiff(options.outputTiff.get().toFile(), new TIFFImage(
+				Arrays.asList(rmapTiffDirectory, gmapTiffDirectory)));
 	}
 
-	private static FileDirectory createTiffDirectory(
-			byte[] rmap, Map<Integer, ImageFrame> tileFramesByNumber, Palette palette) {
+	private static FileDirectory exportMapToTiffDirectory(
+			BiFunction<Integer, Integer, Color[]> tileCoordsToPixels) {
 		int width = MAP_WIDTH * TILE_DIMENSION;
 		int height = MAP_HEIGHT * TILE_DIMENSION;
 
 		return TiffWriting.createRgbTiffDirectory(width, height, sampleSetter -> {
 			for (int tileX = 0; tileX < MAP_WIDTH; tileX++) {
 				for (int tileY = 0; tileY < MAP_HEIGHT; tileY++) {
-					int tileNumber = Byte.toUnsignedInt(rmap[tileY * MAP_WIDTH + tileX]);
-					byte[] tilePixels = tileFramesByNumber.get(tileNumber).getPixels();
+					Color[] tilePixels = tileCoordsToPixels.apply(tileX, tileY);
 
 					for (int yInTile = 0, yInOutput = tileY * TILE_DIMENSION;
 							yInTile < TILE_DIMENSION;
@@ -144,8 +165,7 @@ public class RegionTool {
 						for (int xInTile = 0, xInOutput = tileX * TILE_DIMENSION;
 								xInTile < TILE_DIMENSION;
 								xInTile++, xInOutput++) {
-							Color color = palette.getColor(Byte.toUnsignedInt(
-									tilePixels[yInTile * TILE_DIMENSION + xInTile]));
+							Color color = tilePixels[yInTile * TILE_DIMENSION + xInTile];
 							sampleSetter.set(
 									xInOutput, yInOutput, color.red, color.green, color.blue, 255);
 						}
