@@ -5,9 +5,10 @@ import static com.google.common.base.Preconditions.checkState;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import joptsimple.OptionException;
 import joptsimple.OptionParser;
@@ -19,7 +20,7 @@ import mil.nga.tiff.FileDirectory;
 import mil.nga.tiff.TIFFImage;
 import mil.nga.tiff.TiffWriter;
 import net.johnglassmyer.dsun.common.gff.GffFile;
-import net.johnglassmyer.dsun.common.gff.GffiTable;
+import net.johnglassmyer.dsun.common.gff.ResourceDescriptor;
 import net.johnglassmyer.dsun.common.image.Color;
 import net.johnglassmyer.dsun.common.image.Palette;
 import net.johnglassmyer.dsun.common.image.ImageFrame;
@@ -97,16 +98,14 @@ public class RegionTool {
 		Options options = new Options.Processor().process(args);
 
 		GffFile rgnGff = GffFile.create(Files.readAllBytes(options.rgnGff.get()));
-		GffiTable tileTable = rgnGff.getTablesByTag().get("TILE");
-		int numberOfTiles = tileTable.getNumberOfChunks();
-		List<ImageFrame> tileImages = new ArrayList<>(numberOfTiles);
-		for (int i = 0; i < numberOfTiles; i++) {
-			byte[] tileChunk = rgnGff.getChunkData("TILE", i);
-			List<ImageFrame> images = ImageReading.extractFrames(tileChunk);
-			if (!images.isEmpty()) {
-				tileImages.add(images.get(0));
-			}
-		}
+		List<ResourceDescriptor> rgnResources = rgnGff.describeResources();
+
+		Map<Integer, ImageFrame> tileFramesByNumber = rgnResources.stream()
+				.filter(r -> r.tag.equals("TILE"))
+				.collect(Collectors.toMap(
+						r -> r.number,
+						r -> ImageReading.extractFrames(
+								rgnGff.getResourceData(r.tag, r.number)).get(0)));
 
 		// TODO: support dsun2 regions
 		// TODO: support crimson regions
@@ -115,25 +114,29 @@ public class RegionTool {
 
 		// TODO: properly render animated colors
 
-		byte[] rmap = rgnGff.getChunkData("RMAP",  0);
+		int regionNumber =
+				rgnResources.stream().filter(r -> r.tag.equals("RMAP")).findFirst().get().number;
+
+		byte[] rmap = rgnGff.getResourceData("RMAP", regionNumber);
+		byte[] gmap = rgnGff.getResourceData("GMAP", regionNumber);
 		checkState(rmap.length == MAP_WIDTH * MAP_HEIGHT, "Unexpected RMAP size");
 
 		Palette palette = Palette.fromPalData(Files.readAllBytes(options.pal.get()));
 
-		FileDirectory tiffDirectory = createTiffDirectory(rmap, tileImages, palette);
+		FileDirectory tiffDirectory = createTiffDirectory(rmap, tileFramesByNumber, palette);
 		TiffWriter.writeTiff(options.outputTiff.get().toFile(), new TIFFImage(tiffDirectory));
 	}
 
 	private static FileDirectory createTiffDirectory(
-			byte[] rmap, List<ImageFrame> tileImages, Palette palette) {
+			byte[] rmap, Map<Integer, ImageFrame> tileFramesByNumber, Palette palette) {
 		int width = MAP_WIDTH * TILE_DIMENSION;
 		int height = MAP_HEIGHT * TILE_DIMENSION;
 
 		return TiffWriting.createRgbTiffDirectory(width, height, sampleSetter -> {
 			for (int tileX = 0; tileX < MAP_WIDTH; tileX++) {
 				for (int tileY = 0; tileY < MAP_HEIGHT; tileY++) {
-					int tileIndex = Byte.toUnsignedInt(rmap[tileY * MAP_WIDTH + tileX]) - 1;
-					byte[] tilePixels = tileImages.get(tileIndex).getPixels();
+					int tileNumber = Byte.toUnsignedInt(rmap[tileY * MAP_WIDTH + tileX]);
+					byte[] tilePixels = tileFramesByNumber.get(tileNumber).getPixels();
 
 					for (int yInTile = 0, yInOutput = tileY * TILE_DIMENSION;
 							yInTile < TILE_DIMENSION;

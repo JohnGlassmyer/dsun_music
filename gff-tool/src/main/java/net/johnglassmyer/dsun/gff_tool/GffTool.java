@@ -22,13 +22,12 @@ import java.io.PrintStream;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
 import java.util.Optional;
-import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
 import joptsimple.OptionException;
 import joptsimple.OptionParser;
@@ -37,7 +36,7 @@ import joptsimple.OptionSpec;
 import joptsimple.util.PathConverter;
 import joptsimple.util.PathProperties;
 import net.johnglassmyer.dsun.common.gff.GffFile;
-import net.johnglassmyer.dsun.common.gff.GffiTable;
+import net.johnglassmyer.dsun.common.gff.ResourceDescriptor;
 import net.johnglassmyer.dsun.common.options.OptionsProcessor;
 import net.johnglassmyer.dsun.common.options.OptionsWithHelp;
 
@@ -95,7 +94,7 @@ public class GffTool {
 
 			@Override
 			public void printUsage() {
-				System.out.println("To list resources in a GFF:");
+				System.out.println("To list the resources in a GFF:");
 				System.out.println("  java -jar gff-tool.jar --gff=<gffFile> --list-contents");
 				System.out.println("");
 				System.out.println("To extract all resources in a GFF into a directory:");
@@ -130,20 +129,6 @@ public class GffTool {
 		}
 	}
 
-	static class ChunkDescriptor {
-		final String tag;
-		final int index;
-		final int offset;
-		final int size;
-
-		ChunkDescriptor(String tag, int index, int offset, int size) {
-			this.tag = tag;
-			this.index = index;
-			this.offset = offset;
-			this.size = size;
-		}
-	}
-
 	private static final PrintStream OUT = System.out;
 
 	public static void main(String[] args) throws IOException, URISyntaxException {
@@ -159,13 +144,13 @@ public class GffTool {
 		}
 
 		if (options.extractToDir.isPresent()) {
-			extractAllChunks(gffFile, options.extractToDir.get());
+			extractAllResources(gffFile, options.extractToDir.get());
 		}
 
 		if (options.replaceWith.isPresent()) {
 			byte[] replacement = Files.readAllBytes(options.replaceWith.get());
 
-			byte[] bytesWithReplacement = gffFile.replaceChunk(
+			byte[] bytesWithReplacement = gffFile.replaceResource(
 					options.tag.get(), options.index.get(), replacement);
 
 			Files.write(gffPath, bytesWithReplacement);
@@ -173,79 +158,54 @@ public class GffTool {
 	}
 
 	private static void listContents(GffFile gffFile, int length) {
-		NavigableMap<Integer, ChunkDescriptor> descriptorsByOffset = new TreeMap<>();
+		List<ResourceDescriptor> descriptors = gffFile.describeResources();
 
-		Map<String, GffiTable> tablesByTag = gffFile.getTablesByTag();
-
-		for (Map.Entry<String, GffiTable> tagAndTable : tablesByTag.entrySet()) {
-			String tag = tagAndTable.getKey();
-			GffiTable table = tagAndTable.getValue();
-			for (int i = 0; i < table.getNumberOfChunks(); i++) {
-				int offset = table.getOffset(i);
-				int size = table.getSize(i);
-				descriptorsByOffset.put(offset, new ChunkDescriptor(tag, i, offset, size));
-			}
-		}
-
-		OUT.println("  Listing contents.");
-		OUT.println("    offset   chunk    size");
-		OUT.println("    -------- -------- --------");
-		String template = "    0x%06X %-8s %8d\n";
-		String noChunk = "........";
+		OUT.println("Listing contents.");
+		OUT.println("  offset   tag  number size");
+		OUT.println("  -------- ---- ------ --------");
+		String resourceTemplate = "  0x%06X %4s  %5d %8d\n";
+		String nonResourceTemplate = "  0x%06X .... ...... %8d\n";
 		int lastEnd = 0;
-		for (Map.Entry<Integer, ChunkDescriptor> offsetAndDescriptor :
-				descriptorsByOffset.entrySet()) {
-			int offset = offsetAndDescriptor.getKey();
+		for (ResourceDescriptor descriptor : descriptors) {
+			int offset = descriptor.offset;
 
 			if (lastEnd < offset) {
-				OUT.format(template, lastEnd, noChunk, offset - lastEnd);
+				OUT.format(nonResourceTemplate, lastEnd, offset - lastEnd);
 			}
 
-			ChunkDescriptor descriptor = offsetAndDescriptor.getValue();
-
-			int numberOfEntries = tablesByTag.get(descriptor.tag).getNumberOfChunks();
-			String chunkName = formatChunkName(descriptor.tag, descriptor.index, numberOfEntries);
-
-			OUT.format(template, offset, chunkName, descriptor.size);
+			OUT.format(
+					resourceTemplate, offset, descriptor.tag, descriptor.number, descriptor.size);
 
 			lastEnd = offset + descriptor.size;
 		}
 		if (lastEnd < length) {
-			OUT.format(template, lastEnd, noChunk, length - lastEnd);
+			OUT.format(nonResourceTemplate, lastEnd, length - lastEnd);
 		}
 	}
 
-	private static String formatChunkName(String tag, int index, int numberOfEntries) {
-		return String.format("%s-%s", tag, formatIndex(index, numberOfEntries));
-	}
-
-	private static String formatIndex(int index, int numberOfEntries) {
-		int numberOfIndexDigits = String.valueOf(numberOfEntries - 1).length();
-		String indexTemplate = String.format("%%0%dd", numberOfIndexDigits);
-		return String.format(indexTemplate, index);
-	}
-
-	private static void extractAllChunks(GffFile gffFile, Path dirPath) throws IOException {
-		OUT.format("  Extracting all chunks to directory %s.\n", dirPath);
+	private static void extractAllResources(GffFile gffFile, Path dirPath) throws IOException {
+		OUT.format("Extracting all resources to directory %s.\n", dirPath);
 
 		Files.createDirectories(dirPath);
 
-		Map<String, GffiTable> tablesByTag = gffFile.getTablesByTag();
+		List<ResourceDescriptor> gffResources = gffFile.describeResources();
 
-		List<String> sortedTags = new ArrayList<>(tablesByTag.keySet());
-		Collections.sort(sortedTags);
+		ConcurrentMap<String, Integer> maxNumberDigitsForTag = new ConcurrentHashMap<>();
+		for (ResourceDescriptor descriptor : gffResources) {
+			maxNumberDigitsForTag.merge(
+					descriptor.tag, String.valueOf(descriptor.number).length(), Math::max);
+		}
 
-		for (String tag : sortedTags) {
-			GffiTable table = tablesByTag.get(tag);
+		Map<String, String> templateForTag = maxNumberDigitsForTag.entrySet().stream()
+				.collect(Collectors.toMap(
+						Map.Entry::getKey,
+						tagAndMaxDigits -> "%s-%0" + tagAndMaxDigits.getValue() + "d"));
 
-			int numberOfChunks = table.getNumberOfChunks();
-			for (int i = 0; i < numberOfChunks; i++) {
-				String chunkName = formatChunkName(tag, i, numberOfChunks);
-				byte[] chunkData = gffFile.getChunkData(tag, i);
-				Files.write(dirPath.resolve(chunkName), chunkData);
-			}
-
-			OUT.format("    %s: %d chunks\n", tag, numberOfChunks);
+		for (ResourceDescriptor descriptor : gffResources) {
+			String template = templateForTag.get(descriptor.tag);
+			String name = String.format(template, descriptor.tag, descriptor.number);
+			byte[] resourceData = gffFile.getResourceData(descriptor.tag, descriptor.number);
+			Files.write(dirPath.resolve(name), resourceData);
 		}
 	}
 }

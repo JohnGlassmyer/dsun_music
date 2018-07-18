@@ -1,6 +1,5 @@
 package net.johnglassmyer.dsun.common.image;
 
-import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
@@ -13,7 +12,7 @@ public class ImageReading {
 	private static final int COLUMN_256_FLAG = 0x1;
 	private static final int LAST_RUN_FLAG = 0x80;
 
-	public static List<ImageFrame> extractFrames(byte[] imageBytes) throws IOException {
+	public static List<ImageFrame> extractFrames(byte[] imageBytes) {
 		ByteBuffer buffer = ByteBuffer.wrap(imageBytes);
 		buffer.order(ByteOrder.LITTLE_ENDIAN);
 
