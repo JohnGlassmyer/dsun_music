@@ -13,4 +13,4 @@ Have a JDK and Apache Maven installed, check out the code, and run `mvn package`
 
 You can run any of these with `java -jar <JAR_FILE> --help` for further instructions.
 
-License is GPLv3.
+License is MIT.
