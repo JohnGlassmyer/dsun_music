@@ -60,7 +60,7 @@ public class GffTool {
 								new PathConverter(PathProperties.FILE_EXISTING));
 				OptionSpec<String> tag = parser.accepts("tag")
 						.withRequiredArg().ofType(String.class);
-				OptionSpec<Integer> index = parser.accepts("index")
+				OptionSpec<Integer> number = parser.accepts("number")
 						.withRequiredArg().ofType(Integer.class);
 
 				OptionSet optionSet = parser.parse(args);
@@ -71,7 +71,7 @@ public class GffTool {
 						optionSet.valueOfOptional(extractToDir),
 						optionSet.valueOfOptional(replaceWith),
 						optionSet.valueOfOptional(tag),
-						optionSet.valueOfOptional(index)) {
+						optionSet.valueOfOptional(number)) {
 					@Override
 					public boolean isHelpRequested() {
 						return optionSet.has(help);
@@ -85,9 +85,9 @@ public class GffTool {
 						+ (options.extractToDir.isPresent() ? 1 : 0)
 						+ (options.replaceWith.isPresent() ? 1 : 0);
 
-				// tag and/or index only with replace-with
+				// tag and/or number only with replace-with
 				boolean areReplaceWithOptionsCorrect = !(options.replaceWith.isPresent()
-						^ (options.tag.isPresent() || options.index.isPresent()));
+						^ (options.tag.isPresent() || options.number.isPresent()));
 
 				return options.gff.isPresent() && commandCount == 1 && areReplaceWithOptionsCorrect;
 			}
@@ -103,7 +103,7 @@ public class GffTool {
 				System.out.println("");
 				System.out.println("To replace a resource in a GFF:");
 				System.out.println("  java -jar gff-tool.jar --gff=<gffFile> "
-						+ "--replace-with=<file> --tag=TAG --index=n");
+						+ "--replace-with=<file> --tag=TAG --number=n");
 			}
 		}
 
@@ -112,20 +112,20 @@ public class GffTool {
 		final Optional<Path> extractToDir;
 		final Optional<Path> replaceWith;
 		final Optional<String> tag;
-		final Optional<Integer> index;
+		final Optional<Integer> number;
 
 		Options(Optional<Path> gff,
 				boolean listContents,
 				Optional<Path> extractToDir,
 				Optional<Path> replaceWith,
 				Optional<String> tag,
-				Optional<Integer> index) {
+				Optional<Integer> number) {
 			this.gff = gff;
 			this.listContents = listContents;
 			this.extractToDir = extractToDir;
 			this.replaceWith = replaceWith;
 			this.tag = tag;
-			this.index = index;
+			this.number = number;
 		}
 	}
 
@@ -151,7 +151,7 @@ public class GffTool {
 			byte[] replacement = Files.readAllBytes(options.replaceWith.get());
 
 			byte[] bytesWithReplacement = gffFile.replaceResource(
-					options.tag.get(), options.index.get(), replacement);
+					options.tag.get(), options.number.get(), replacement);
 
 			Files.write(gffPath, bytesWithReplacement);
 		}
