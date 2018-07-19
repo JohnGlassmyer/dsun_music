@@ -7,8 +7,23 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 public class GffFile {
+	public static class NoSuchResourceInGffException extends RuntimeException {
+		private static final long serialVersionUID = 1L;
+
+		public final String tag;
+		public final int resourceNumber;
+
+		NoSuchResourceInGffException(String tag, int resourceNumber) {
+			super(String.format("no resource %s-%d in GFF file", tag, resourceNumber));
+
+			this.tag = tag;
+			this.resourceNumber = resourceNumber;
+		}
+	}
+
 	private static class SecondaryTableDescriptor {
 		final int secondaryTableIndex;
 		final int resourceNumberingOffset;
@@ -112,9 +127,10 @@ public class GffFile {
 
 	public byte[] getResourceData(String tag, int resourceNumber) {
 		GffiTable table = tablesByTag.get(tag);
-		int index = table.getIndexForResourceNumber(resourceNumber).orElseThrow(
-				() -> new IllegalArgumentException(
-						String.format("no resource %s-%d in GFF file", tag, resourceNumber)));
+		int index = Optional.ofNullable(table)
+				.flatMap(t -> t.getIndexForResourceNumber(resourceNumber))
+				.orElseThrow(() -> new NoSuchResourceInGffException(tag, resourceNumber));
+
 		byte[] data = new byte[table.getSize(index)];
 		System.arraycopy(
 				bytes, table.getOffset(index), data, 0, table.getSize(index));
@@ -123,10 +139,9 @@ public class GffFile {
 
 	public byte[] replaceResource(String tag, int resourceNumber, byte[] replacement) {
 		GffiTable table = tablesByTag.get(tag);
-
-		int index = table.getIndexForResourceNumber(resourceNumber).orElseThrow(
-				() -> new IllegalArgumentException(
-						String.format("no resource %s-%d in GFF file", tag, resourceNumber)));
+		int index = Optional.ofNullable(table)
+				.flatMap(t -> t.getIndexForResourceNumber(resourceNumber))
+				.orElseThrow(() -> new NoSuchResourceInGffException(tag, resourceNumber));
 
 		int newSize = replacement.length;
 		int newOffset;
