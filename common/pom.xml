@@ -12,6 +12,7 @@
 	<artifactId>common</artifactId>
 
 	<dependencies>
+		<!-- compile -->
 		<dependency>
 			<groupId>com.google.guava</groupId>
 			<artifactId>guava</artifactId>
@@ -23,6 +24,27 @@
 		<dependency>
 			<groupId>net.sf.jopt-simple</groupId>
 			<artifactId>jopt-simple</artifactId>
+		</dependency>
+		
+		<!-- test -->
+		<dependency>
+			<groupId>com.google.truth</groupId>
+			<artifactId>truth</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-api</artifactId>
+			<scope>test</scope>
+		</dependency>
+		
+		<!-- provided -->
+		<dependency>
+			<!-- required on classpath to run tests in Eclipse -->
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-engine</artifactId>
+			<scope>provided</scope>
+			<version>5.2.0</version>
 		</dependency>
 	</dependencies>
 </project>

@@ -97,9 +97,6 @@ public class ImageTool {
 	public static void main(String[] args) throws IOException {
 		Options options = new Options.Processor().process(args);
 
-		// TODO: support dsun2 images
-		// TODO: support crimson images
-
 		byte[] imageBytes = Files.readAllBytes(options.image.get());
 		List<ImageFrame> frames = ImageReading.extractFrames(imageBytes);
 

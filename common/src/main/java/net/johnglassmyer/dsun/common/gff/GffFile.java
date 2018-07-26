@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-public class GffFile {
+public class GffFile implements GffReader {
 	public static class NoSuchResourceInGffException extends RuntimeException {
 		private static final long serialVersionUID = 1L;
 
@@ -108,6 +108,7 @@ public class GffFile {
 		this.tablesByTag = tablesByTag;
 	}
 
+	@Override
 	public List<ResourceDescriptor> describeResources() {
 		List<ResourceDescriptor> descriptors = new ArrayList<>();
 
@@ -125,6 +126,13 @@ public class GffFile {
 		return descriptors;
 	}
 
+	@Override
+	public boolean hasResource(String tag, int resourceNumber) {
+		return Optional.ofNullable(tablesByTag.get(tag)).map(
+				t -> t.getIndexForResourceNumber(resourceNumber)).isPresent();
+	}
+
+	@Override
 	public byte[] getResourceData(String tag, int resourceNumber) {
 		GffiTable table = tablesByTag.get(tag);
 		int index = Optional.ofNullable(table)

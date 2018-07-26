@@ -66,13 +66,13 @@ abstract class GffiTable {
 		buffer.putInt(entryPosition(index) + sizeOffset(), size);
 	}
 
-	private int entryPosition(int index) {
-		return startPosition + 4 + index * entrySize();
-	}
-
 	protected abstract int entrySize();
 
 	protected abstract int offsetOffset();
 
 	protected abstract int sizeOffset();
+
+	private int entryPosition(int index) {
+		return startPosition + 4 + index * entrySize();
+	}
 }

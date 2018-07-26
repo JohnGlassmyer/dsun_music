@@ -38,7 +38,7 @@ public class ImageFrame {
 			int rowStart = yAndRuns.getKey() * width;
 			for (PixelRun run : yAndRuns.getValue()) {
 				int runStart = rowStart + run.startX;
-				alphaBitmask.set(runStart, runStart + run.pixels.length);
+				alphaBitmask.set(runStart, runStart + run.length());
 			}
 		}
 
@@ -51,7 +51,7 @@ public class ImageFrame {
 		for (Map.Entry<Integer, List<PixelRun>> yAndRuns : runsByRow.entrySet()) {
 			int rowStart = yAndRuns.getKey() * width;
 			for (PixelRun run : yAndRuns.getValue()) {
-				System.arraycopy(run.pixels, 0, pixels, rowStart + run.startX, run.pixels.length);
+				run.writeTo(pixels, rowStart + run.startX);
 			}
 		}
 

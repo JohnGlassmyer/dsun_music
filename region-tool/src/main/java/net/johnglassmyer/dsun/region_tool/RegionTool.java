@@ -1,6 +1,9 @@
 package net.johnglassmyer.dsun.region_tool;
 
-import java.io.IOException;
+import static net.johnglassmyer.dsun.common.UncheckedIo.uncheckFunctionIo;
+import static net.johnglassmyer.dsun.common.UncheckedIo.uncheckRunnableIo;
+import static net.johnglassmyer.dsun.common.UncheckedIo.uncheckSupplierIo;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
@@ -11,7 +14,12 @@ import java.util.Optional;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import com.google.common.collect.Iterables;
 
 import joptsimple.OptionException;
 import joptsimple.OptionParser;
@@ -25,6 +33,8 @@ import mil.nga.tiff.TIFFImage;
 import mil.nga.tiff.TiffWriter;
 import net.johnglassmyer.dsun.common.gff.GffFile;
 import net.johnglassmyer.dsun.common.gff.GffFile.NoSuchResourceInGffException;
+import net.johnglassmyer.dsun.common.gff.GffFileList;
+import net.johnglassmyer.dsun.common.gff.GffReader;
 import net.johnglassmyer.dsun.common.gff.ResourceDescriptor;
 import net.johnglassmyer.dsun.common.image.Color;
 import net.johnglassmyer.dsun.common.image.Palette;
@@ -46,27 +56,23 @@ public class RegionTool {
 				OptionSpec<Path> rgnGff = parser.accepts("rgn-gff")
 						.withRequiredArg()
 						.withValuesConvertedBy(new PathConverter(PathProperties.FILE_EXISTING));
-				OptionSpec<Path> gpldataGff = parser.accepts("gpldata-gff")
+				OptionSpec<Path> outputTiff = parser.accepts("output-tiff")
 						.withRequiredArg()
-						.withValuesConvertedBy(new PathConverter(PathProperties.FILE_EXISTING));
-				OptionSpec<Path> segobjexGff = parser.accepts("segobjex-gff")
+						.withValuesConvertedBy(new PathConverter());
+				OptionSpec<Path> otherGff = parser.accepts("other-gff")
 						.withRequiredArg()
 						.withValuesConvertedBy(new PathConverter(PathProperties.FILE_EXISTING));
 				OptionSpec<Path> pal = parser.accepts("pal")
 						.withRequiredArg()
 						.withValuesConvertedBy(new PathConverter(PathProperties.FILE_EXISTING));
-				OptionSpec<Path> outputTiff = parser.accepts("output-tiff")
-						.withRequiredArg()
-						.withValuesConvertedBy(new PathConverter());
 
 				OptionSet optionSet = parser.parse(args);
 
 				return new Options(
 						optionSet.valueOfOptional(rgnGff),
-						optionSet.valueOfOptional(gpldataGff),
-						optionSet.valueOfOptional(segobjexGff),
-						optionSet.valueOfOptional(pal),
-						optionSet.valueOfOptional(outputTiff)) {
+						optionSet.valueOfOptional(outputTiff),
+						optionSet.valuesOf(otherGff),
+						optionSet.valueOfOptional(pal)) {
 					@Override
 					public boolean isHelpRequested() {
 						return optionSet.has(help);
@@ -76,193 +82,257 @@ public class RegionTool {
 
 			@Override
 			public boolean isUsageValid(Options options) {
-				return options.rgnGff.isPresent()
-						&& options.gpldataGff.isPresent()
-						&& options.segobjexGff.isPresent()
-						&& options.outputTiff.isPresent();
+				return options.rgnGff.isPresent() && options.outputTiff.isPresent();
 			}
 
 			@Override
 			public void printUsage() {
 				System.out.println("To export TIFF of a region:");
-				System.out.println("  java -jar region-tool.jar "
-						+ "--rgn-gff=<rgnGffFile> "
-						+ "--gpldata-gff=<gpldataGffFile> "
-						+ "--segobjex-gff=<segobjexGffFile> "
-						+ "[--pal=<palFile>] "
-						+ "--output-tiff=<tiffFile>");
+				System.out.println("  java -jar region-tool.jar"
+						+ " --rgn-gff=<rgnGffFile>"
+						+ " --other-gff=<gffFile>..."
+						+ " [--pal=<palFile>]"
+						+ " --output-tiff=<tiffFile>");
 				System.out.println();
-				System.out.println("If pal is not specified, then the matching palette "
-						+ "from gpldata-gff will be used.");
+				System.out.println("The --other-gff option should be used multiple times to specify"
+						+ " the necessary segobjex/objex and gpldata GFFs; e.g.:");
+				System.out.println("  java -jar region-tool.jar --rgn-gff=RGN02.GFF"
+						+ " --other-gff=SEGOBJEX.GFF --other-gff=GPLDATA.GFF"
+						+ " --output-tiff=RGN02.tiff");
+				System.out.println();
+				System.out.println("If --pal is not specified, the matching palette will be sought"
+						+ " in rgn-gff and other-gff.");
 			}
 		}
 
 		final Optional<Path> rgnGff;
-		final Optional<Path> gpldataGff;
-		final Optional<Path> segobjexGff;
-		final Optional<Path> pal;
 		final Optional<Path> outputTiff;
+		final List<Path> otherGff;
+		final Optional<Path> pal;
 
 		Options(
 				Optional<Path> rgnGff,
-				Optional<Path> gpldataGff,
-				Optional<Path> segobjexGff,
-				Optional<Path> pal,
-				Optional<Path> outputTiff) {
+				Optional<Path> outputTiff,
+				List<Path> otherGff,
+				Optional<Path> pal) {
 			this.rgnGff = rgnGff;
-			this.gpldataGff = gpldataGff;
-			this.segobjexGff = segobjexGff;
-			this.pal = pal;
 			this.outputTiff = outputTiff;
+			this.otherGff = otherGff;
+			this.pal = pal;
 		}
 	}
 
-	private static final int MAP_WIDTH = 128;
-	private static final int MAP_HEIGHT = 98;
-	private static final int TILE_DIMENSION = 16;
-	private static final int GMAP_WALL_INDEX_BITMASK = 63;
+	private static class Sprite {
+		final int x;
+		final int y;
+		final ImageFrame frame;
+		final boolean mirrored;
 
-	public static void main(String[] args) throws IOException {
+		Sprite(int x, int y, ImageFrame frame, boolean mirrored) {
+			this.x = x;
+			this.y = y;
+			this.frame = frame;
+			this.mirrored = mirrored;
+		}
+	}
+
+	private static class EtabEntry {
+		final int x;
+		final int y;
+		final int yOffset;
+		final boolean mirrored;
+		final int ojffNumber;
+
+		EtabEntry(int x, int y, int yOffset, boolean mirrored, int etabOjffNumber) {
+			this.x = x;
+			this.y = y;
+			this.yOffset = yOffset;
+			this.mirrored = mirrored;
+			this.ojffNumber = etabOjffNumber;
+		}
+	}
+
+	private static class Ojff {
+		final int xOffset;
+		final int yOffset;
+		final ImageFrame frame;
+
+		Ojff(int xOffset, int yOffset, ImageFrame frame) {
+			this.xOffset = xOffset;
+			this.yOffset = yOffset;
+			this.frame = frame;
+		}
+	}
+
+	private static final int REGION_TILE_WIDTH = 128;
+	private static final int REGION_TILE_HEIGHT = 98;
+	private static final int TILE_PIXEL_SIZE = 16;
+	private static final int REGION_PIXEL_HEIGHT = REGION_TILE_HEIGHT * TILE_PIXEL_SIZE;
+	private static final int REGION_PIXEL_WIDTH = REGION_TILE_WIDTH * TILE_PIXEL_SIZE;
+	private static final int GMAP_WALL_INDEX_BITMASK = 31;
+
+	public static void main(String[] args) {
 		Options options = new Options.Processor().process(args);
 
-		GffFile rgnGff = GffFile.create(Files.readAllBytes(options.rgnGff.get()));
-		List<ResourceDescriptor> rgnDescriptors = rgnGff.describeResources();
-
-		// TODO: support dsun2 regions
-		// TODO: support crimson regions
+		GffFile rgnGff = GffFile.create(uncheckSupplierIo(
+				() -> Files.readAllBytes(options.rgnGff.get())));
 
 		// TODO: properly render animated colors
 
-		int regionNumber =
-				rgnDescriptors.stream().filter(r -> r.tag.equals("RMAP")).findFirst().get().number;
+		int regionNumber = rgnGff.describeResources().stream()
+				.filter(d -> d.tag.equals("GMAP"))
+				.findFirst()
+				.map(d -> d.number)
+				.orElseThrow(() -> new IllegalStateException("no GMAP resource in region GFF"));
 
-		byte[] rmap = rgnGff.getResourceData("RMAP", regionNumber);
 		byte[] gmap = rgnGff.getResourceData("GMAP", regionNumber);
 
-		GffFile gpldataGff = GffFile.create(Files.readAllBytes(options.gpldataGff.get()));
-		GffFile segobjexGff = GffFile.create(Files.readAllBytes(options.segobjexGff.get()));
+		GffFileList gffs = new GffFileList(Stream.concat(
+				Stream.of(rgnGff),
+				options.otherGff.stream()
+						.map(uncheckFunctionIo(path -> GffFile.create(Files.readAllBytes(path)))))
+				.collect(Collectors.toList()));
 
-		Palette palette;
-		if (options.pal.isPresent()) {
-			palette = Palette.fromPalData(Files.readAllBytes(options.pal.get()));
-		} else {
-			palette = Palette.fromPalData(gpldataGff.getResourceData("PAL ", regionNumber));
-		}
+		Palette palette = Palette.fromPalData(options.pal
+				.map(uncheckFunctionIo(path -> Files.readAllBytes(path)))
+				.orElseGet(() -> gffs.getResourceData("PAL ", regionNumber)));
 
-		List<Sprite> sprites = new ArrayList<>();
-		sprites.addAll(createRmapSprites(rgnGff, rmap));
-
-		List<Sprite> etabAndWallSprites = new ArrayList<>();
-		etabAndWallSprites.addAll(createEtabSprites(rgnGff, regionNumber, segobjexGff));
-		etabAndWallSprites.addAll(createWallSprites(regionNumber, gmap, gpldataGff));
-		// sort sprites by bottom edge to avoid incorrect overlap. works only sometimes.
-		// TODO: correctly composite etabs with gmap walls.
-		etabAndWallSprites.sort((s1, s2) -> (s1.y + s1.frame.height) - (s2.y + s2.frame.height));
-		sprites.addAll(etabAndWallSprites);
-
+		Iterable<Sprite> sprites = Iterables.concat(
+				createRmapSprites(gffs),
+				createEtabAndWallSprites(regionNumber, gmap, gffs));
 		FileDirectory spritesTiffDirectory = renderSprites(palette, sprites);
-		spritesTiffDirectory.setStringEntryValue(FieldTagType.PageName, "RMAP, ETAB, GMAP WALL");
+		spritesTiffDirectory.setStringEntryValue(FieldTagType.PageName, "(R)MAP, ETAB, GMAP WALL");
 
 		FileDirectory gmapFlagsTiffDirectory = renderGmapFlags(gmap);
 		gmapFlagsTiffDirectory.setStringEntryValue(FieldTagType.PageName, "GMAP flags");
 
-		TiffWriter.writeTiff(options.outputTiff.get().toFile(), new TIFFImage(
-				Arrays.asList(spritesTiffDirectory, gmapFlagsTiffDirectory)));
+		List<FileDirectory> directories = new ArrayList<>();
+		directories.add(spritesTiffDirectory);
+		directories.add(gmapFlagsTiffDirectory);
+
+		uncheckRunnableIo(() -> TiffWriter.writeTiff(
+				options.outputTiff.get().toFile(),
+				new TIFFImage(Arrays.asList(spritesTiffDirectory, gmapFlagsTiffDirectory))));
 	}
 
-	private static List<Sprite> createRmapSprites(GffFile rgnGff, byte[] rmap) {
-		List<Sprite> rmapSprites = new ArrayList<>();
+	private static List<Sprite> createRmapSprites(GffReader gff) {
+		List<ResourceDescriptor> descriptors = gff.describeResources();
 
-		Map<Integer, ImageFrame> tileFramesByNumber = rgnGff.describeResources().stream()
+		ResourceDescriptor mapDescriptor = descriptors.stream()
+				.filter(r -> r.tag.equals("RMAP") || r.tag.equals("MAP "))
+				.findFirst().orElseThrow(
+						() -> new IllegalStateException("no RMAP or MAP resource in region GFF"));
+
+		byte[] map = gff.getResourceData(mapDescriptor.tag, mapDescriptor.number);
+
+		Map<Integer, ImageFrame> tileFramesByNumber = descriptors.stream()
 				.filter(r -> r.tag.equals("TILE"))
 				.collect(Collectors.toMap(
 						r -> r.number,
 						r -> ImageReading.extractFrames(
-								rgnGff.getResourceData(r.tag, r.number)).get(0)));
+								gff.getResourceData(r.tag, r.number)).get(0)));
 
-		for (int rmapY = 0; rmapY < MAP_HEIGHT; rmapY++) {
-			for (int rmapX = 0; rmapX < MAP_WIDTH; rmapX++) {
-				int rmapByte = Byte.toUnsignedInt(rmap[rmapY * MAP_WIDTH + rmapX]);
+		List<Sprite> rmapSprites = new ArrayList<>();
+		for (int mapY = 0; mapY < REGION_TILE_HEIGHT; mapY++) {
+			for (int mapX = 0; mapX < REGION_TILE_WIDTH; mapX++) {
+				int rmapByte = Byte.toUnsignedInt(map[mapY * REGION_TILE_WIDTH + mapX]);
 				ImageFrame frame = tileFramesByNumber.get(rmapByte);
-				rmapSprites.add(new Sprite(rmapX * TILE_DIMENSION, rmapY * TILE_DIMENSION, frame));
+				rmapSprites.add(new Sprite(
+						mapX * TILE_PIXEL_SIZE, mapY * TILE_PIXEL_SIZE, frame, false));
 			}
 		}
 
 		return rmapSprites;
 	}
 
-	private static List<Sprite> createEtabSprites(
-			GffFile rgnGff, int regionNumber, GffFile segobjexGff) {
-		List<Sprite> etabSprites = new ArrayList<>();
+	private static List<Sprite> createEtabAndWallSprites(
+			int regionNumber, byte[] gmap, GffFileList gffs) {
+		// Informed by procedure at file offset 0x22FD2 in DSUN.EXE of Dark Sun: Shattered Lands.
 
-		// TODO: correctly draw mirrored objects
+		List<Sprite> etabAndWallSprites = new ArrayList<>();
+		int iEtab = 0;
+		List<EtabEntry> etabs = createEtabEntries(gffs, regionNumber);
+		Map<Integer, Ojff> ojffCache = new HashMap<>();
+		Map<Integer, ImageFrame> wallCache = new HashMap<>();
+		for (int tileY = 0; tileY < REGION_TILE_HEIGHT; tileY++) {
+			while (iEtab < etabs.size() && etabs.get(iEtab).y / TILE_PIXEL_SIZE <= tileY) {
+				EtabEntry etab = etabs.get(iEtab);
 
-		byte[] etabBytes = rgnGff.getResourceData("ETAB", regionNumber);
-		for (int etabOffset = 0; etabOffset < etabBytes.length; etabOffset += 8) {
-			ByteBuffer etabBuffer = ByteBuffer.wrap(etabBytes);
-			etabBuffer.order(ByteOrder.LITTLE_ENDIAN);
-			int etabX = etabBuffer.getShort(etabOffset + 0);
-			int etabY = etabBuffer.getShort(etabOffset + 2);
-			int etabOjffNumber = etabBuffer.getShort(etabOffset + 6);
-			if (etabOjffNumber < 0) {
-				int ojffNumber = -etabOjffNumber;
-				byte[] ojffBytes = segobjexGff.getResourceData("OJFF", ojffNumber);
-				ByteBuffer ojffBuffer = ByteBuffer.wrap(ojffBytes);
-				ojffBuffer.order(ByteOrder.LITTLE_ENDIAN);
-				int bmpNumber = Short.toUnsignedInt(ojffBuffer.getShort(0xC));
-				byte[] bmpBytes = segobjexGff.getResourceData("BMP ", bmpNumber);
-				List<ImageFrame> frames = ImageReading.extractFrames(bmpBytes);
-				ImageFrame frame = frames.get(0);
-				int x = etabX - ojffBuffer.getShort(2);
-				int y = etabY - ojffBuffer.getShort(4);
-				etabSprites.add(new Sprite(x, y, frame));
+				int ojffNumber = etab.ojffNumber < 0 ? -etab.ojffNumber : etab.ojffNumber;
+				Ojff ojff = ojffCache.computeIfAbsent(ojffNumber, n -> readOjff(gffs, ojffNumber));
+
+				int x = etab.x - ojff.xOffset;
+				int y = etab.y - ojff.yOffset - etab.yOffset;
+
+				etabAndWallSprites.add(new Sprite(x, y, ojff.frame, etab.mirrored));
+
+				iEtab++;
 			}
-		}
 
-		return etabSprites;
-	}
-
-	private static List<Sprite> createWallSprites(
-			int regionNumber, byte[] gmap, GffFile gpldataGff) {
-		List<Sprite> wallSprites = new ArrayList<>();
-
-		for (int gmapY = 0; gmapY < MAP_HEIGHT; gmapY++) {
-			gmapX:
-			for (int gmapX = 0; gmapX < MAP_WIDTH; gmapX++) {
-				int wallIndex = gmap[gmapY * MAP_WIDTH + gmapX] & GMAP_WALL_INDEX_BITMASK;
+			for (int tileX = 0; tileX < REGION_TILE_WIDTH; tileX++) {
+				int wallIndex = gmap[tileY * REGION_TILE_WIDTH + tileX] & GMAP_WALL_INDEX_BITMASK;
 				if (wallIndex > 0) {
 					int wallNumber = regionNumber * 100 + wallIndex - 1;
 
-					if ((wallIndex - 1) > 28) {
-						System.out.format("%d @ %d,%d\n", wallNumber, gmapX, gmapY);
-					}
+					ImageFrame frame = wallCache.computeIfAbsent(wallNumber, n -> {
+						byte[] wallResourceData;
+						try {
+							wallResourceData = gffs.getResourceData("WALL", wallNumber);
+						} catch (NoSuchResourceInGffException nsre) {
+							System.err.println(nsre.getMessage());
+							return new ImageFrame(0, 0, Collections.emptyNavigableMap());
+						}
 
-					byte[] wallResourceData;
-					try {
-						wallResourceData = gpldataGff.getResourceData("WALL", wallNumber);
-					} catch (NoSuchResourceInGffException nsre) {
-						System.err.println(nsre.getMessage());
-						continue gmapX;
-					}
+						return ImageReading.extractFrames(wallResourceData).get(0);
+					});
 
-					ImageFrame frame = ImageReading.extractFrames(wallResourceData).get(0);
+					int spriteX = tileX * TILE_PIXEL_SIZE + 8 - frame.width / 2;
+					int spriteY = tileY * TILE_PIXEL_SIZE + 16 - frame.height;
 
-					// account for the varying heights of wall images
-					int spriteY = gmapY * TILE_DIMENSION + TILE_DIMENSION - frame.height;
-
-					wallSprites.add(new Sprite(
-							gmapX * TILE_DIMENSION, spriteY, frame));
+					etabAndWallSprites.add(new Sprite(spriteX, spriteY, frame, false));
 				}
 			}
 		}
 
-		return wallSprites;
+		return etabAndWallSprites;
 	}
 
-	private static FileDirectory renderSprites(Palette palette, List<Sprite> sprites) {
+	private static List<EtabEntry> createEtabEntries(GffReader gffs, int regionNumber) {
+		List<EtabEntry> etabEntries = new ArrayList<>();
+		byte[] etabBytes = gffs.getResourceData("ETAB", regionNumber);
+		ByteBuffer etabBuffer = ByteBuffer.wrap(etabBytes);
+		etabBuffer.order(ByteOrder.LITTLE_ENDIAN);
+		for (int etabOffset = 0; etabOffset < etabBytes.length; etabOffset += 8) {
+			int x = etabBuffer.getShort(etabOffset + 0);
+			int y = etabBuffer.getShort(etabOffset + 2);
+			int yOffset = etabBuffer.get(etabOffset + 4);
+			int byte5 = Byte.toUnsignedInt(etabBuffer.get(etabOffset + 5));
+			boolean mirrored = (byte5 & 0x80) != 0;
+			int ojffNumber = etabBuffer.getShort(etabOffset + 6);
+
+			etabEntries.add(new EtabEntry(x, y, yOffset, mirrored, ojffNumber));
+		}
+
+		return etabEntries;
+	}
+
+	private static Ojff readOjff(GffReader gffFile, int ojffNumber) {
+		byte[] ojffBytes = gffFile.getResourceData("OJFF", ojffNumber);
+		ByteBuffer ojffBuffer = ByteBuffer.wrap(ojffBytes);
+		ojffBuffer.order(ByteOrder.LITTLE_ENDIAN);
+		int xOffset = ojffBuffer.getShort(2);
+		int yOffset = ojffBuffer.getShort(4);
+		int bmpNumber = Short.toUnsignedInt(ojffBuffer.getShort(0xC));
+		byte[] bmpBytes = gffFile.getResourceData("BMP ", bmpNumber);
+		List<ImageFrame> frames = ImageReading.extractFrames(bmpBytes);
+		ImageFrame frame = frames.get(0);
+
+		return new Ojff(xOffset, yOffset, frame);
+	}
+
+	private static FileDirectory renderSprites(Palette palette, Iterable<Sprite> sprites) {
 		return TiffWriting.createRgbTiffDirectory(
-				MAP_WIDTH * TILE_DIMENSION, MAP_HEIGHT * TILE_DIMENSION,
-				(sampleSetter) -> {
+				REGION_PIXEL_WIDTH, REGION_PIXEL_HEIGHT, (sampleSetter) -> {
 			for (Sprite sprite : sprites) {
 				ImageFrame frame = sprite.frame;
 				BitSet alphaMask = frame.getAlphaMask();
@@ -272,33 +342,33 @@ public class RegionTool {
 						if (alphaMask.get(pixelIndex)) {
 							Color color = palette.getColor(Byte.toUnsignedInt(
 									frame.getPixels()[pixelIndex]));
-							int x = sprite.x + xInSprite;
+							int x = sprite.x
+									+ (sprite.mirrored ? frame.width - 1 - xInSprite : xInSprite);
 							int y = sprite.y + yInSprite;
-							if (0 <= x && x < MAP_WIDTH * TILE_DIMENSION
-									&& 0 <= y && y < MAP_HEIGHT * TILE_DIMENSION) {
+							if (0 <= x && x < REGION_PIXEL_WIDTH
+									&& 0 <= y && y < REGION_PIXEL_HEIGHT) {
 								sampleSetter.set(x, y, color.red, color.green, color.blue, 255);
 							}
 						}
 					}
 				}
-			}});
+			}
+		});
 	}
 
 	private static FileDirectory renderGmapFlags(byte[] gmap) {
-		int width = MAP_WIDTH * TILE_DIMENSION;
-		int height = MAP_HEIGHT * TILE_DIMENSION;
-
-		return TiffWriting.createRgbTiffDirectory(width, height, sampleSetter -> {
-			for (int tileX = 0; tileX < MAP_WIDTH; tileX++) {
-				for (int tileY = 0; tileY < MAP_HEIGHT; tileY++) {
-					int gmapByte = Byte.toUnsignedInt(gmap[tileY * MAP_WIDTH + tileX]);
+		return TiffWriting.createRgbTiffDirectory(
+				REGION_PIXEL_WIDTH, REGION_PIXEL_HEIGHT, sampleSetter -> {
+			for (int tileX = 0; tileX < REGION_TILE_WIDTH; tileX++) {
+				for (int tileY = 0; tileY < REGION_TILE_HEIGHT; tileY++) {
+					int gmapByte = Byte.toUnsignedInt(gmap[tileY * REGION_TILE_WIDTH + tileX]);
 					int flagBits = gmapByte & ~GMAP_WALL_INDEX_BITMASK;
 					Color color = new Color(flagBits, flagBits, flagBits);
-					for (int yInTile = 0, yInOutput = tileY * TILE_DIMENSION;
-							yInTile < TILE_DIMENSION;
+					for (int yInTile = 0, yInOutput = tileY * TILE_PIXEL_SIZE;
+							yInTile < TILE_PIXEL_SIZE;
 							yInTile++, yInOutput++) {
-						for (int xInTile = 0, xInOutput = tileX * TILE_DIMENSION;
-								xInTile < TILE_DIMENSION;
+						for (int xInTile = 0, xInOutput = tileX * TILE_PIXEL_SIZE;
+								xInTile < TILE_PIXEL_SIZE;
 								xInTile++, xInOutput++) {
 							sampleSetter.set(
 									xInOutput, yInOutput, color.red, color.green, color.blue, 255);
@@ -307,17 +377,5 @@ public class RegionTool {
 				}
 			}
 		});
-	}
-}
-
-class Sprite {
-	final int x;
-	final int y;
-	final ImageFrame frame;
-
-	Sprite(int x, int y, ImageFrame frame) {
-		this.x = x;
-		this.y = y;
-		this.frame = frame;
 	}
 }
