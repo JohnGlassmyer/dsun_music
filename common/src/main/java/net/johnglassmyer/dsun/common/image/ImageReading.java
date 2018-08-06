@@ -1,5 +1,7 @@
 package net.johnglassmyer.dsun.common.image;
 
+import static java.util.stream.IntStream.range;
+
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -273,19 +275,17 @@ public class ImageReading {
 		PlanarDecoder decoder = new PlanarDecoder(symbolSource, pixelValueDictionary);
 
 		NavigableMap<Integer, List<PixelRun>> runsByRow = new TreeMap<>();
-		for (int y = 0; y < height; y++) {
+		range(0, height).forEach(y -> {
 			PixelRunsBuilder runsBuilder = new PixelRunsBuilder();
-			for (int x = 0; x < width; x++) {
-				Optional<Byte> optionalPixel = decoder.nextPixel();
 
-				if (optionalPixel.isPresent()) {
-					runsBuilder.record(x, optionalPixel.get());
-				}
-			}
+			range(0, width).forEach(x ->
+					decoder.nextPixel().ifPresent(b -> runsBuilder.record(x, b)));
 
+			// finish any run that ran to the end of the frame
 			runsBuilder.finishRun();
+
 			runsByRow.put(y, runsBuilder.getRuns());
-		}
+		});
 
 		return new ImageFrame(width, height, runsByRow);
 	}
