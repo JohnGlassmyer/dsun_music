@@ -1,8 +1,8 @@
 package net.johnglassmyer.dsun.region_tool;
 
-import static net.johnglassmyer.dsun.common.UncheckedIo.uncheckFunctionIo;
-import static net.johnglassmyer.dsun.common.UncheckedIo.uncheckRunnableIo;
-import static net.johnglassmyer.dsun.common.UncheckedIo.uncheckSupplierIo;
+import static net.johnglassmyer.uncheckers.IoUncheckers.callUncheckedIoRunnable;
+import static net.johnglassmyer.uncheckers.IoUncheckers.callUncheckedIoSupplier;
+import static net.johnglassmyer.uncheckers.IoUncheckers.uncheckIoFunction;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -174,7 +174,7 @@ public class RegionTool {
 	public static void main(String[] args) {
 		Options options = new Options.Processor().process(args);
 
-		GffFile rgnGff = GffFile.create(uncheckSupplierIo(
+		GffFile rgnGff = GffFile.create(callUncheckedIoSupplier(
 				() -> Files.readAllBytes(options.rgnGff.get())));
 
 		// TODO: properly render animated colors
@@ -190,11 +190,11 @@ public class RegionTool {
 		GffFileList gffs = new GffFileList(Stream.concat(
 				Stream.of(rgnGff),
 				options.otherGff.stream()
-						.map(uncheckFunctionIo(path -> GffFile.create(Files.readAllBytes(path)))))
+						.map(uncheckIoFunction(path -> GffFile.create(Files.readAllBytes(path)))))
 				.collect(Collectors.toList()));
 
 		Palette palette = Palette.fromPalData(options.pal
-				.map(uncheckFunctionIo(path -> Files.readAllBytes(path)))
+				.map(uncheckIoFunction(path -> Files.readAllBytes(path)))
 				.orElseGet(() -> gffs.getResourceData("PAL ", regionNumber)));
 
 		Iterable<Sprite> sprites = Iterables.concat(
@@ -210,7 +210,7 @@ public class RegionTool {
 		directories.add(spritesTiffDirectory);
 		directories.add(gmapFlagsTiffDirectory);
 
-		uncheckRunnableIo(() -> TiffWriter.writeTiff(
+		callUncheckedIoRunnable(() -> TiffWriter.writeTiff(
 				options.outputTiff.get().toFile(),
 				new TIFFImage(Arrays.asList(spritesTiffDirectory, gmapFlagsTiffDirectory))));
 	}

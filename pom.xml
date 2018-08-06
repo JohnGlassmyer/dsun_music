@@ -21,6 +21,13 @@
 		<module>xmi-tool</module>
 	</modules>
 
+	<repositories>
+		<repository>
+			<id>johnglassmyer-github-releases</id>
+			<url>https://raw.github.com/JohnGlassmyer/maven-repository/master/releases</url>
+		</repository>
+	</repositories>
+
 	<dependencyManagement>
 		<dependencies>
 			<dependency>
@@ -37,6 +44,11 @@
 				<groupId>net.johnglassmyer.dsun</groupId>
 				<artifactId>common</artifactId>
 				<version>${project.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>net.johnglassmyer.uncheckers</groupId>
+				<artifactId>uncheckers</artifactId>
+				<version>20180805d</version>
 			</dependency>
 			<dependency>
 				<groupId>net.sf.jopt-simple</groupId>
