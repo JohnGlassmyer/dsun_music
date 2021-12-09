@@ -14,3 +14,6 @@ Have a JDK and Apache Maven installed, check out the code, and run `mvn package`
 You can run any of these with `java -jar <JAR_FILE> --help` for further instructions.
 
 License is MIT.
+
+As multiple people running D&D campaigns have asked me for images of the regions of Dark Sun: Shattered Lands, I've uploaded images of them (rendered using the region-tool) to imgur here:
+- https://imgur.com/a/X3cdql9
